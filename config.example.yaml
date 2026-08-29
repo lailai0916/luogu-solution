@@ -1,0 +1,23 @@
+# Copy to ~/.config/luogu-solution/config.yaml. Keep credentials outside repositories.
+# Store an optional Cookie in ~/.config/luogu-solution/cookie.txt with mode 0600, or use
+# LUOGU_COOKIE. Problem work is written to ~/.cache/luogu/<PID>/.
+
+luogu:
+  base_url: 'https://www.luogu.com.cn'
+  csrf_url: 'https://www.luogu.com.cn/user/setting'
+  request_delay: 1.0
+  max_solutions: 8
+  article:
+    category: 2
+    status: 2
+    top: 0
+
+verify:
+  cxx: 'g++'
+  std: 'c++17'
+  compile_timeout: 60
+  run_timeout: 10
+
+stress:
+  rounds: 1000
+  run_timeout: 5
