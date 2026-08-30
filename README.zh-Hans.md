@@ -2,6 +2,7 @@
   <h1>Luogu Solution</h1>
   <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
   <p>
+    <img src="https://img.shields.io/github/actions/workflow/status/lailai0916/luogu-solution/ci.yml?branch=main&style=flat-square" />
     <img src="https://img.shields.io/github/last-commit/lailai0916/luogu-solution?style=flat-square" />
     <img src="https://img.shields.io/github/languages/top/lailai0916/luogu-solution?style=flat-square" />
     <img src="https://img.shields.io/github/repo-size/lailai0916/luogu-solution?style=flat-square" />
