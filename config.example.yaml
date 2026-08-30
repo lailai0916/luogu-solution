@@ -10,11 +10,12 @@ luogu:
   article:
     category: 2
     status: 2
-    top: 0
+    blog_base_url: 'https://lailai.one'
 
 verify:
   cxx: 'g++'
-  std: 'c++17'
+  std: 'c++14'
+  optimization: 'O2'
   compile_timeout: 60
   run_timeout: 10
 

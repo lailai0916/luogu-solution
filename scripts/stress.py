@@ -16,7 +16,8 @@ class StressError(Exception):
 
 def _compile(source: Path, binary: Path) -> None:
     config = load_config()["verify"]
-    command = [config["cxx"], f"-std={config['std']}", "-O2", "-o", str(binary), str(source)]
+    optimization = str(config.get("optimization", "O2"))
+    command = [config["cxx"], f"-std={config['std']}", f"-{optimization}", "-o", str(binary), str(source)]
     if compat_dir().exists():
         command[1:1] = ["-I", str(compat_dir())]
     try:

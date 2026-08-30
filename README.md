@@ -24,10 +24,10 @@ concise Chinese solution, and safely create or synchronize a Luogu article.
   stress testing form one workflow.
 - **Dense OI writing** — H2-only solution structure, problem-specific explanation, and
   proportional complexity analysis.
-- **Composable GNU C++17 style** — a compact default profile plus clean replacement by a caller or
+- **Composable GNU C++14 style** — a compact default profile plus clean replacement by a caller or
   target repository's own OI style, without copied rule manuals.
 - **Safe account operations** — local credentials, explicit live authorization, full read-back,
-  and a current platform-policy gate before review submission.
+  and a current platform-policy or account-exception gate before review submission.
 
 ## Getting Started
 

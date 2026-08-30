@@ -1,5 +1,13 @@
 # Solution writing
 
+## Active profile
+
+This file is a compact fallback for callers without a complete presentation profile. If the
+caller or target supplies writing, terminology, Markdown, or LaTeX rules, load all matching rules
+before drafting and apply them as hard constraints. They override both this fallback and a
+platform formatting guide wherever they conflict. Keep those rules at their owner; do not copy
+their manuals into this Skill.
+
 ## Audience and density
 
 Write for a reader who already knows standard C++ and common OI algorithms. Explain the
@@ -25,7 +33,9 @@ The usual compact structure is:
 ## 参考代码
 ```
 
-Omit `题意简述` when the original statement is already short and restating it adds nothing.
+Use `题意简述` in most solutions. Compress the task into one or two professional sentences,
+without repeating the story or teaching standard notation. Omit it only when the original task is
+already a single precise sentence and any restatement would add no information.
 Keep the reasoning in complete paragraphs. Use a list only for genuinely parallel or mutually
 exclusive cases; do not replace one derivation chain with many tiny headings or bold pseudo
 headings.
@@ -64,12 +74,18 @@ Use an H2 `参考代码` heading and a `cpp` fence. The program must be complete
 submittable. Apply the active caller / target code profile when one exists; otherwise use the
 compact default in `code-style.md`.
 
+The fenced program is always directly visible. Never wrap reference code in
+`::::info[点击展开代码]`, `<details>`, or any other collapsible container, regardless of length.
+
 ## Final pass
 
 - The central observation is justified, and every condition in the code appears in the prose.
 - No paragraph teaches a standard prerequisite or repeats an earlier conclusion.
 - Heading depth is at most H2; structure has not been mechanically fragmented.
 - Complexity treatment matches the three-level rule above.
+- The reference program is directly visible and has no collapsible wrapper.
 - Formula, code, and terminology are consistent; no invented AC or optimality claim appears.
+- The active caller / target writing, Markdown, LaTeX, and code checkers all pass; a pass from this
+  Skill's structural linter alone never claims profile compliance.
 - No AI declaration, promotional footer, reviewer request, or process narration appears in the
   draft. If live publication is requested, apply `publishing.md` separately.

@@ -58,11 +58,16 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "csrf_url": "https://www.luogu.com.cn/user/setting",
         "request_delay": 1.0,
         "max_solutions": 8,
-        "article": {"category": 2, "status": 2, "top": 0},
+        "article": {
+            "category": 2,
+            "status": 2,
+            "blog_base_url": "https://lailai.one",
+        },
     },
     "verify": {
         "cxx": "g++",
-        "std": "c++17",
+        "std": "c++14",
+        "optimization": "O2",
         "compile_timeout": 60,
         "run_timeout": 10,
     },
@@ -106,6 +111,25 @@ def load_cookie() -> str | None:
         if text:
             return text
     return None
+
+
+def shield_path_text(text: str) -> str:
+    """Escape text for a Shields static-badge path segment."""
+    return text.replace("-", "--").replace("_", "__").replace(" ", "_")
+
+
+def render_luogu_article(pid: str, body: str) -> str:
+    """Render the Luogu-only envelope around a platform-neutral solution body."""
+    article = load_config()["luogu"]["article"]
+    blog_base_url = str(article.get("blog_base_url", "https://lailai.one")).rstrip("/")
+    badge_pid = shield_path_text(pid)
+    badges = (
+        f"[![](https://img.shields.io/badge/Luogu-{badge_pid}-blue?style=for-the-badge&logo=luogu)]"
+        f"(https://www.luogu.com.cn/problem/{pid})\n"
+        f"[![](https://img.shields.io/badge/Blog-Solution-blue?style=for-the-badge&logo=markdown)]"
+        f"({blog_base_url}/blog/solution/{pid})\n\n"
+    )
+    return badges + normalize_transport(body) + "\n"
 
 
 _SECRET_PAT = re.compile(r"(_uid=|__client_id=|csrf|cookie|token)[^;\s]*", re.IGNORECASE)

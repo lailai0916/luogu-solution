@@ -213,6 +213,8 @@ class LuoguClient:
             "category": _first(article, "category"),
             "status": _first(article, "status"),
             "top": _first(article, "top"),
+            "time": _first(article, "time"),
+            "promoteStatus": _first(article, "promoteStatus"),
             "url": f"{self.base_url}/article/{lid}",
         }
 

@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import subprocess
 import sys
 import tempfile
@@ -40,16 +42,20 @@ class VerifyResult:
         return "\n".join(out)
 
 
-def _load_samples(pid: str) -> list[tuple[str, str]]:
+def _load_problem(pid: str) -> dict[str, Any]:
     raw = cache_dir(pid) / "raw" / "problem.json"
     if not raw.exists():
-        return []
+        return {}
     try:
         data = json.loads(raw.read_text(encoding="utf-8"))
     except ValueError:
-        return []
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_samples(problem: dict[str, Any]) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
-    for s in data.get("samples") or []:
+    for s in problem.get("samples") or []:
         if isinstance(s, (list, tuple)) and len(s) >= 2:
             out.append((str(s[0]), str(s[1])))
         elif isinstance(s, dict):
@@ -62,6 +68,35 @@ def _normalize_output(text: str) -> str:
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines)
+
+
+def _float_tolerance(problem: dict[str, Any]) -> float | None:
+    output_format = str(problem.get("outputFormat") or "")
+    if not re.search(r"absolute|relative|误差", output_format, re.IGNORECASE):
+        return None
+    match = re.search(r"10\s*\^\s*\{?\s*-(\d+)\s*\}?", output_format)
+    return 10 ** -int(match.group(1)) if match else None
+
+
+def _outputs_match(got: str, expected: str, tolerance: float | None) -> bool:
+    if got == expected:
+        return True
+    if tolerance is None:
+        return False
+    got_tokens = got.split()
+    expected_tokens = expected.split()
+    if len(got_tokens) != len(expected_tokens):
+        return False
+    try:
+        pairs = [(float(x), float(y)) for x, y in zip(got_tokens, expected_tokens)]
+    except ValueError:
+        return False
+    return all(
+        math.isfinite(x)
+        and math.isfinite(y)
+        and abs(x - y) <= tolerance * max(1.0, abs(y))
+        for x, y in pairs
+    )
 
 
 def verify(pid: str) -> VerifyResult:
@@ -77,7 +112,8 @@ def verify(pid: str) -> VerifyResult:
     cfg = load_config()["verify"]
     with tempfile.TemporaryDirectory() as td:
         binary = Path(td) / "sol"
-        cmd = [cfg["cxx"], f"-std={cfg['std']}", "-O2", "-o", str(binary), str(src)]
+        optimization = str(cfg.get("optimization", "O2"))
+        cmd = [cfg["cxx"], f"-std={cfg['std']}", f"-{optimization}", "-o", str(binary), str(src)]
         # macOS/Apple clang 无 <bits/stdc++.h>，用垫片头补（不影响 GNU g++）。
         if compat_dir().exists():
             cmd[1:1] = ["-I", str(compat_dir())]
@@ -93,9 +129,10 @@ def verify(pid: str) -> VerifyResult:
             tail = "\n".join((cp.stderr or "").strip().splitlines()[-8:]) or "未知错误"
             res.add("编译", False, f"{cfg['cxx']} 失败:\n{tail}")
             return res
-        res.add("编译", True, f"{cfg['cxx']} -std={cfg['std']}")
+        res.add("编译", True, f"{cfg['cxx']} -std={cfg['std']} -{optimization}")
 
-        samples = _load_samples(pid)
+        problem = _load_problem(pid)
+        samples = _load_samples(problem)
         if not samples:
             res.add("样例运行", True, "无样例，跳过")
             return res
@@ -112,7 +149,7 @@ def verify(pid: str) -> VerifyResult:
                 res.add(f"样例 #{i}", False, f"运行非零退出 {rp.returncode}")
                 continue
             got, exp = _normalize_output(rp.stdout), _normalize_output(expected)
-            if got == exp:
+            if _outputs_match(got, exp, _float_tolerance(problem)):
                 passed += 1
                 res.add(f"样例 #{i}", True, "通过")
             else:

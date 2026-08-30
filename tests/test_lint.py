@@ -47,6 +47,11 @@ class SolutionLintTest(unittest.TestCase):
         styled_elsewhere = GOOD.replace("int f[10];", "int dp[10]; // caller style")
         self.assertEqual(lint_text(styled_elsewhere, enforce_default_style=False), [])
 
+    def test_code_folding_is_always_rejected(self) -> None:
+        folded = GOOD.replace("```cpp", "::::info[点击展开代码]\n\n```cpp") + "\n::::\n"
+        issues = "\n".join(lint_text(folded, enforce_default_style=False))
+        self.assertIn("参考代码禁止折叠", issues)
+
 
 if __name__ == "__main__":
     unittest.main()

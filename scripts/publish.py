@@ -20,6 +20,7 @@ from util import (
     parse_markdown,
     pid_normalize,
     publishable_body,
+    render_luogu_article,
 )
 
 logger = get_logger()
@@ -47,6 +48,9 @@ def _save_metadata(pid: str, article: dict[str, Any]) -> None:
         "lid": str(article.get("lid") or ""),
         "title": article.get("title") or "",
         "url": article.get("url") or "",
+        "time": article.get("time"),
+        "top": article.get("top"),
+        "promoteStatus": article.get("promoteStatus"),
     }
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -81,9 +85,10 @@ def load_source(value: str, *, lid: str | None = None, title: str | None = None)
     parsed = parse_markdown(raw)
     frontmatter = parsed["frontmatter"]
     metadata = _load_metadata(pid)
-    content = publishable_body(raw)
-    if not content.strip():
+    body = publishable_body(raw)
+    if not body.strip():
         raise ValueError("题解正文为空")
+    content = render_luogu_article(pid, body)
     return {
         "pid": pid,
         "path": path,
@@ -96,11 +101,20 @@ def load_source(value: str, *, lid: str | None = None, title: str | None = None)
 
 def _with_disclosure(source: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     source = dict(source)
-    if args.eligibility == "agent-generated":
-        raise ValueError("Agent 生成了关键思路、论证或代码：按当前洛谷规则不得执行真实发布或投稿。")
+    account_exception = getattr(args, "confirm_account_exception", False)
+    if account_exception and args.eligibility != "agent-generated":
+        raise ValueError("--confirm-account-exception 仅适用于 agent-generated。")
+    if args.eligibility == "agent-generated" and not getattr(args, "confirm_account_exception", False):
+        raise ValueError(
+            "Agent 生成了关键思路、论证或代码：真实发布须有账号专项授权，"
+            "并传入 --confirm-account-exception。"
+        )
     if args.eligibility == "editorial-ai":
         if not args.disclosure_file:
             raise ValueError("editorial-ai 必须提供 --disclosure-file，且内容须准确说明允许范围内的贡献。")
+    if args.eligibility == "human-authored" and args.disclosure_file:
+        raise ValueError("human-authored 不应提供 --disclosure-file；请如实选择内容来源。")
+    if args.disclosure_file:
         disclosure_path = Path(args.disclosure_file).expanduser().resolve()
         disclosure = normalize_transport(disclosure_path.read_text(encoding="utf-8"))
         if not disclosure:
@@ -151,6 +165,9 @@ def _article_lid(article: dict[str, Any]) -> str:
 
 
 def publish_live(source: dict[str, Any], *, submit_review: bool, policy_checked: bool) -> int:
+    if submit_review and not policy_checked:
+        raise ValueError("投稿审核前必须重新核验官方规则，并传入 --confirm-current-policy。")
+
     client = LuoguClient()
     if not client.check_login().get("logged_in"):
         raise LoginExpiredError("未登录或 Cookie 失效，请更新 Cookie 后重试。")
@@ -165,7 +182,7 @@ def publish_live(source: dict[str, Any], *, submit_review: bool, policy_checked:
         "content": source["content"],
         "solutionFor": source["pid"],
         "status": (current or {}).get("status") or config.get("status", 2),
-        "top": (current or {}).get("top") if (current or {}).get("top") is not None else config.get("top", 0),
+        "top": 2,
     }
 
     if source["lid"]:
@@ -183,12 +200,13 @@ def publish_live(source: dict[str, Any], *, submit_review: bool, policy_checked:
     if read_back.get("contentFull") is False or result == "substantive":
         logger.error("回读不完整或存在实质差异；停止投稿审核。")
         return 1
+    if read_back.get("top") != payload["top"]:
+        logger.error("回读置顶量不一致：期望 %s，实际 %s；停止投稿审核。", payload["top"], read_back.get("top"))
+        return 1
     read_back["lid"] = lid
     _save_metadata(source["pid"], read_back)
 
     if submit_review:
-        if not policy_checked:
-            raise ValueError("投稿审核前必须重新核验官方规则，并传入 --confirm-current-policy。")
         client.request_solution_review(lid)
         print(f"=== 已提交题解审核请求 {source['pid']} lid={lid} ===")
     return 0
@@ -212,6 +230,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--live", action="store_true", help="create or update the article")
     parser.add_argument("--submit-review", action="store_true", help="request solution review after live publish")
     parser.add_argument("--confirm-current-policy", action="store_true", help="confirm official rules were rechecked")
+    parser.add_argument(
+        "--confirm-account-exception",
+        action="store_true",
+        help="confirm this account has an explicit exception for Agent-generated solution publication",
+    )
     parser.add_argument("--lid", help="existing article ID")
     parser.add_argument("--title", help="article title override")
     parser.add_argument(
@@ -233,11 +256,15 @@ def main(argv: list[str]) -> int:
     if args.submit_review and not args.live:
         logger.error("--submit-review 必须与 --live 同时使用。")
         return 2
+    if args.live and not args.eligibility:
+        logger.error("真实发布必须声明 --eligibility。")
+        return 2
+    if args.submit_review and not args.confirm_current_policy:
+        logger.error("投稿审核前必须重新核验官方规则，并传入 --confirm-current-policy。")
+        return 2
     try:
         source = load_source(args.source, lid=args.lid, title=args.title)
         if args.live:
-            if not args.eligibility:
-                raise ValueError("真实发布必须声明 --eligibility。")
             source = _with_disclosure(source, args)
             return publish_live(
                 source,
