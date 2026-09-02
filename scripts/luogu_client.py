@@ -15,14 +15,20 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
+import urllib.parse
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Optional
 
 import requests
 
-from util import load_config, load_cookie, redact, get_logger
+from util import get_logger, load_config, load_cookie, normalize_transport, redact
 
 logger = get_logger()
+MIN_REQUEST_INTERVAL = 1.0
+MIN_WRITE_REQUEST_INTERVAL = 2.0
 
 
 class LuoguError(Exception):
@@ -43,12 +49,17 @@ def _first(d: dict, *keys: str, default: Any = None) -> Any:
 
 
 class LuoguClient:
+    _request_lock = threading.Lock()
+    _last_request_at = 0.0
+
     def __init__(self, cookie: Optional[str] = None):
         cfg = load_config()["luogu"]
         self.base_url: str = cfg["base_url"].rstrip("/")
         self.csrf_url: str = cfg["csrf_url"]
         self.request_delay: float = float(cfg.get("request_delay", 1.0))
+        self.write_request_delay: float = float(cfg.get("write_request_delay", 2.0))
         self._cookie = cookie if cookie is not None else load_cookie()
+        self._uid: Optional[str] = None
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -60,6 +71,21 @@ class LuoguClient:
         })
         self._install_cookie(self._cookie)
 
+    @contextmanager
+    def _request_slot(self, *, write: bool = False) -> Iterator[None]:
+        """Serialize Luogu requests and enforce a non-disableable process-wide interval."""
+        interval = max(self.request_delay, MIN_REQUEST_INTERVAL)
+        if write:
+            interval = max(interval, self.write_request_delay, MIN_WRITE_REQUEST_INTERVAL)
+        cls = type(self)
+        with cls._request_lock:
+            now = time.monotonic()
+            wait = cls._last_request_at + interval - now
+            if wait > 0:
+                time.sleep(wait)
+            cls._last_request_at = time.monotonic()
+            yield
+
     def _install_cookie(self, cookie: Optional[str]) -> None:
         """Cookie 装进 cookiejar（非写死 header），并剔除旧 C3VK，让服务器重新下发。"""
         if not cookie:
@@ -69,6 +95,8 @@ class LuoguClient:
             if not part or "=" not in part:
                 continue
             name, value = part.split("=", 1)
+            if name.strip() == "_uid" and value.strip().isdigit():
+                self._uid = value.strip()
             if name.strip().upper() == "C3VK":
                 continue
             self.session.cookies.set(name.strip(), value.strip(), domain=".luogu.com.cn")
@@ -78,13 +106,14 @@ class LuoguClient:
     def _get_json(self, url: str, *, content_only: bool = True) -> dict[str, Any]:
         headers = {"x-lentille-request": "content-only"} if content_only else {}
         try:
-            resp = self.session.get(url, headers=headers, timeout=30)
+            with self._request_slot():
+                resp = self.session.get(url, headers=headers, timeout=30)
         except requests.RequestException as e:
             raise LuoguError(f"请求失败 {url}: {type(e).__name__}") from None
-        if self.request_delay:
-            time.sleep(self.request_delay)
         if resp.status_code in (401, 403):
             raise LoginExpiredError(f"访问 {url} 返回 {resp.status_code}，可能未登录或 Cookie 失效。")
+        if resp.status_code == 429:
+            raise LuoguError(f"访问 {url} 触发频率限制（429）；停止批处理，不自动重试。")
         if resp.status_code == 404:
             raise LuoguError(f"资源不存在 (404): {url}")
         if resp.status_code != 200:
@@ -99,6 +128,35 @@ class LuoguClient:
         if code is not None and code not in (200,):
             raise LuoguError(f"{url} 返回 status={code} {redact(str(data.get('message') or ''))}")
         return _first(data, "data", "currentData", default=data)
+
+    def _get_fe_data(self, url: str) -> dict[str, Any]:
+        """Read a classic Luogu page's authenticated `_feInjection.currentData`."""
+        try:
+            with self._request_slot():
+                resp = self.session.get(url, timeout=30)
+        except requests.RequestException as error:
+            raise LuoguError(f"请求失败 {url}: {type(error).__name__}") from None
+        if resp.status_code in (401, 403):
+            raise LoginExpiredError(f"访问 {url} 返回 {resp.status_code}，可能未登录或 Cookie 失效。")
+        if resp.status_code == 429:
+            raise LuoguError(f"访问 {url} 触发频率限制（429）；停止批处理，不自动重试。")
+        if resp.status_code == 404:
+            raise LuoguError(f"资源不存在 (404): {url}")
+        if resp.status_code != 200:
+            raise LuoguError(f"HTTP {resp.status_code}: {url}")
+        match = re.search(
+            r'window\._feInjection\s*=\s*JSON\.parse\(decodeURIComponent\("([^"]+)"\)\)',
+            resp.text,
+        )
+        if not match:
+            raise LoginExpiredError(f"{url} 缺少页面数据，可能 Cookie 失效或触发风控。")
+        try:
+            data = json.loads(urllib.parse.unquote(match.group(1)))
+        except (ValueError, TypeError):
+            raise LuoguError(f"{url} 页面数据解析失败。") from None
+        if data.get("code") != 200 or not isinstance(data.get("currentData"), dict):
+            raise LuoguError(f"{url} 页面数据状态异常。")
+        return data["currentData"]
 
     # -- 抓题 / 题解（读）---------------------------------------------------
 
@@ -128,6 +186,8 @@ class LuoguClient:
             "limits": problem.get("limits") or {},
             "difficulty": problem.get("difficulty"),
             "tags": problem.get("tags") or [],
+            "type": problem.get("type"),
+            "acceptSolution": problem.get("acceptSolution"),
             "translation": None,
         }
 
@@ -135,9 +195,128 @@ class LuoguClient:
         data = self._get_json(f"{self.base_url}/problem/solution/{pid}?page={page}")
         solutions = _first(data, "solutions", default=data)
         if not isinstance(solutions, dict):
-            return {"count": 0, "perPage": 0, "result": []}
-        solutions.setdefault("result", _first(solutions, "result", "data", default=[]))
+            raise LuoguError(f"题解列表解析失败：{pid}")
+        result = _first(solutions, "result", "data", default=[])
+        if not isinstance(result, list) or any(not isinstance(item, dict) for item in result):
+            raise LuoguError(f"题解列表解析失败：{pid}")
+        solutions["result"] = result
         return solutions
+
+    def get_solution_count(self, pid: str) -> int:
+        solutions = self.get_solution_page(pid)
+        count = _first(solutions, "count", default=None)
+        if not isinstance(count, int) or count < 0:
+            raise LuoguError(f"题解数量解析失败：{pid}")
+        return count
+
+    def get_my_article_page(self, page: int = 1) -> dict[str, Any]:
+        data = self._get_json(f"{self.base_url}/article/mine?page={page}")
+        articles = _first(data, "articles", default=data)
+        if not isinstance(articles, dict):
+            raise LuoguError("我的专栏解析失败。")
+        result = _first(articles, "result", "data", default=[])
+        if not isinstance(result, list) or any(not isinstance(item, dict) for item in result):
+            raise LuoguError("我的专栏解析失败。")
+        articles["result"] = result
+        return articles
+
+    def find_my_solution_articles(self, pid: str) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            articles = self.get_my_article_page(page)
+            items = articles.get("result") or []
+            for item in items:
+                solution = item.get("solutionFor")
+                solution_pid = solution.get("pid") if isinstance(solution, dict) else solution
+                if solution_pid == pid:
+                    result.append(item)
+            count = _first(articles, "count", default=None)
+            per_page = _first(articles, "perPage", default=None)
+            if (
+                type(count) is not int
+                or count < 0
+                or type(per_page) is not int
+                or per_page <= 0
+            ):
+                raise LuoguError("我的专栏分页字段异常，停止资格检查。")
+            if not items:
+                if (page - 1) * per_page < count:
+                    raise LuoguError("我的专栏分页内容不完整，停止资格检查。")
+                break
+            if page * per_page >= count:
+                break
+            if len(items) < per_page:
+                raise LuoguError("我的专栏分页内容不完整，停止资格检查。")
+            page += 1
+            if page > 100:
+                raise LuoguError("我的专栏分页异常，停止资格检查。")
+        return result
+
+    def get_record_page(self, pid: str, page: int = 1, *, status: int = 12) -> dict[str, Any]:
+        """Read the current account's record list for one PID."""
+        if not self._uid:
+            raise LoginExpiredError("Cookie 中缺少有效 _uid，无法核验官方评测记录。")
+        query = urllib.parse.urlencode({
+            "pid": pid,
+            "user": self._uid,
+            "status": status,
+            "page": page,
+        })
+        data = self._get_fe_data(f"{self.base_url}/record/list?{query}")
+        records = _first(data, "records", default={})
+        if not isinstance(records, dict):
+            raise LuoguError(f"评测记录列表解析失败：{pid}")
+        records.setdefault("result", _first(records, "result", "data", default=[]))
+        return records
+
+    def get_record(self, record_id: int | str) -> dict[str, Any]:
+        """Read one official record, including source code when the account may view it."""
+        data = self._get_fe_data(f"{self.base_url}/record/{record_id}")
+        record = _first(data, "record", default=data)
+        if not isinstance(record, dict) or record.get("id") is None:
+            raise LuoguError(f"评测记录解析失败：{record_id}")
+        return record
+
+    def find_matching_accepted_record(self, pid: str, source_code: str) -> Optional[dict[str, Any]]:
+        """Find an Accepted record whose PID, owner, and full source match exactly."""
+        if not self._uid:
+            raise LoginExpiredError("Cookie 中缺少有效 _uid，无法核验官方评测记录。")
+        expected = normalize_transport(source_code)
+        page = 1
+        while True:
+            records = self.get_record_page(pid, page, status=12)
+            items = records.get("result") or []
+            for item in items:
+                problem = item.get("problem") or {}
+                user = item.get("user") or {}
+                if (
+                    item.get("status") != 12
+                    or problem.get("pid") != pid
+                    or str(user.get("uid")) != self._uid
+                    or item.get("id") is None
+                ):
+                    continue
+                record = self.get_record(item["id"])
+                record_problem = record.get("problem") or {}
+                record_user = record.get("user") or {}
+                if (
+                    record.get("status") == 12
+                    and record_problem.get("pid") == pid
+                    and str(record_user.get("uid")) == self._uid
+                    and normalize_transport(str(record.get("sourceCode") or "")) == expected
+                ):
+                    return record
+            count = _first(records, "count", default=len(items))
+            per_page = _first(records, "perPage", default=len(items) or 20)
+            if not items or not isinstance(count, int) or not isinstance(per_page, int):
+                break
+            if page * per_page >= count or len(items) < per_page:
+                break
+            page += 1
+            if page > 100:
+                raise LuoguError("评测记录分页异常，停止 Accepted 核验。")
+        return None
 
     def get_all_solutions(self, pid: str, max_solutions: Optional[int] = None) -> list[dict[str, Any]]:
         """翻页抓题解列表（需登录），无正文的按 lid 补全。每项 lid/title/author/upvote/content/url。"""
@@ -225,11 +404,14 @@ class LuoguClient:
         if not self._cookie:
             raise LoginExpiredError("未配置 Cookie，无法获取 CSRF token。")
         try:
-            resp = self.session.get(page_url or self.csrf_url, timeout=30)
+            with self._request_slot():
+                resp = self.session.get(page_url or self.csrf_url, timeout=30)
         except requests.RequestException as e:
             raise LuoguError(f"获取 CSRF 失败: {type(e).__name__}") from None
         if resp.status_code in (401, 403):
             raise LoginExpiredError("获取 CSRF 被拒，Cookie 可能失效，请更新 Cookie。")
+        if resp.status_code == 429:
+            raise LuoguError("获取 CSRF 触发频率限制（429）；停止批处理，不自动重试。")
         m = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', resp.text)
         if not m:
             raise LoginExpiredError("页面找不到 csrf-token，通常是未登录 / Cookie 失效。")
@@ -245,15 +427,18 @@ class LuoguClient:
             "origin": self.base_url,
         }
         try:
-            resp = self.session.post(
-                url, headers=headers,
-                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                timeout=30, allow_redirects=True,
-            )
+            with self._request_slot(write=True):
+                resp = self.session.post(
+                    url, headers=headers,
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    timeout=30, allow_redirects=True,
+                )
         except requests.RequestException as e:
             raise LuoguError(f"写请求失败 {url}: {type(e).__name__}") from None
         if resp.status_code in (401, 403):
             raise LoginExpiredError("写操作被拒（401/403），Cookie/CSRF 可能失效。")
+        if resp.status_code == 429:
+            raise LuoguError("写操作触发频率限制（429）；停止批处理，不自动重试。")
         if resp.status_code == 404:
             raise LuoguError(f"接口不存在 (404)，端点可能已变更：{url}")
         if resp.status_code not in (200, 201):

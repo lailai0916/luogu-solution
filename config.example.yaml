@@ -5,16 +5,17 @@
 luogu:
   base_url: 'https://www.luogu.com.cn'
   csrf_url: 'https://www.luogu.com.cn/user/setting'
+  # Values below the built-in 1 s read / 2 s write floors are ignored.
   request_delay: 1.0
+  write_request_delay: 2.0
   max_solutions: 8
   article:
     category: 2
     status: 2
-    blog_base_url: 'https://lailai.one'
 
 verify:
   cxx: 'g++'
-  std: 'c++14'
+  std: 'c++17'
   optimization: 'O2'
   compile_timeout: 60
   run_timeout: 10

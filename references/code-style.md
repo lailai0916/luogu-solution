@@ -1,4 +1,4 @@
-# Default GNU C++14 profile
+# Default GNU C++17 profile
 
 ## Scope
 
@@ -11,7 +11,7 @@ checks in `scripts/lint.py`, and their tests aligned.
 
 ## Default choices
 
-- Use GNU C++14, `#include <bits/stdc++.h>`, and `using namespace std;`.
+- Use GNU C++17, `#include <bits/stdc++.h>`, and `using namespace std;`.
 - Indent with one Tab. Put ordinary braces on their own lines; a single short statement may stay
   inline without braces.
 - Keep the program compact and directly submittable. Remove debugging code, defensive scaffolding,
@@ -22,7 +22,7 @@ checks in `scripts/lint.py`, and their tests aligned.
   conventional contest names. The bundled default uses `f` for DP state rather than `dp`.
 - Keep formulas, indices, intervals, and identifiers consistent between prose and code.
 
-These choices define the bundled example only. Correctness, GNU C++14 compatibility, and complete
+These choices define the bundled example only. Correctness, GNU C++17 compatibility, and complete
 submittability remain workflow requirements under every profile.
 
 ## Validation

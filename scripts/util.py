@@ -57,16 +57,16 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "base_url": "https://www.luogu.com.cn",
         "csrf_url": "https://www.luogu.com.cn/user/setting",
         "request_delay": 1.0,
+        "write_request_delay": 2.0,
         "max_solutions": 8,
         "article": {
             "category": 2,
             "status": 2,
-            "blog_base_url": "https://lailai.one",
         },
     },
     "verify": {
         "cxx": "g++",
-        "std": "c++14",
+        "std": "c++17",
         "optimization": "O2",
         "compile_timeout": 60,
         "run_timeout": 10,
@@ -120,14 +120,10 @@ def shield_path_text(text: str) -> str:
 
 def render_luogu_article(pid: str, body: str) -> str:
     """Render the Luogu-only envelope around a platform-neutral solution body."""
-    article = load_config()["luogu"]["article"]
-    blog_base_url = str(article.get("blog_base_url", "https://lailai.one")).rstrip("/")
     badge_pid = shield_path_text(pid)
     badges = (
         f"[![](https://img.shields.io/badge/Luogu-{badge_pid}-blue?style=for-the-badge&logo=luogu)]"
-        f"(https://www.luogu.com.cn/problem/{pid})\n"
-        f"[![](https://img.shields.io/badge/Blog-Solution-blue?style=for-the-badge&logo=markdown)]"
-        f"({blog_base_url}/blog/solution/{pid})\n\n"
+        f"(https://www.luogu.com.cn/problem/{pid})\n\n"
     )
     return badges + normalize_transport(body) + "\n"
 

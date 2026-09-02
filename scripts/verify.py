@@ -14,9 +14,11 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from gates import artifact_digest
 from util import cache_dir, load_config, get_logger, pid_normalize, compat_dir
 
 logger = get_logger()
@@ -158,12 +160,35 @@ def verify(pid: str) -> VerifyResult:
     return res
 
 
+def record_verification(pid: str, result: VerifyResult) -> Path:
+    pid = pid_normalize(pid)
+    work_dir = cache_dir(pid)
+    raw_dir = work_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    statement = work_dir / "problem.md"
+    source = work_dir / "solution.cpp"
+    evidence = {
+        "version": 1,
+        "pid": pid,
+        "status": "pass" if result.ok else "fail",
+        "recordedAt": datetime.now(timezone.utc).isoformat(),
+        "statement": artifact_digest(statement) if statement.exists() else None,
+        "source": artifact_digest(source) if source.exists() else None,
+        "steps": result.steps,
+    }
+    path = raw_dir / "local-verification.json"
+    path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print("用法: python verify.py P1001", file=sys.stderr)
         return 2
     res = verify(argv[1])
+    path = record_verification(argv[1], res)
     print(res.summary())
+    print(f"本地验证记录：{path}")
     return 0 if res.ok else 1
 
 

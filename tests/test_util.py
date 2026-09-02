@@ -4,6 +4,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import yaml
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
@@ -19,9 +21,17 @@ from util import (  # noqa: E402
 
 
 class UtilTest(unittest.TestCase):
-    def test_default_verification_matches_luogu_cxx14_o2_target(self) -> None:
-        self.assertEqual(_DEFAULT_CONFIG["verify"]["std"], "c++14")
+    def test_default_verification_matches_luogu_cxx17_o2_target(self) -> None:
+        self.assertEqual(_DEFAULT_CONFIG["verify"]["std"], "c++17")
         self.assertEqual(_DEFAULT_CONFIG["verify"]["optimization"], "O2")
+        example = yaml.safe_load((SCRIPTS.parent / "config.example.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(example["verify"]["std"], "c++17")
+        self.assertEqual(example["verify"]["optimization"], "O2")
+
+    def test_candidate_policy_is_not_configurable(self) -> None:
+        example = yaml.safe_load((SCRIPTS.parent / "config.example.yaml").read_text(encoding="utf-8"))
+        self.assertNotIn("candidate", _DEFAULT_CONFIG["luogu"])
+        self.assertNotIn("candidate", example["luogu"])
 
     def test_pid_normalize(self) -> None:
         self.assertEqual(pid_normalize(" p1001 "), "P1001")
@@ -38,16 +48,14 @@ class UtilTest(unittest.TestCase):
         self.assertEqual(classify("a\n\nb", "a\nb"), "whitespace")
         self.assertEqual(classify("a", "b"), "substantive")
 
-    def test_luogu_envelope_has_exact_badges(self) -> None:
+    def test_luogu_envelope_has_only_the_problem_badge(self) -> None:
         self.assertEqual(shield_path_text("AT_arc-1"), "AT__arc--1")
         result = render_luogu_article("P1001", "## 解题思路\n\n正文\n")
         self.assertTrue(result.startswith(
             "[![](https://img.shields.io/badge/Luogu-P1001-blue?style=for-the-badge&logo=luogu)]"
-            "(https://www.luogu.com.cn/problem/P1001)\n"
-            "[![](https://img.shields.io/badge/Blog-Solution-blue?style=for-the-badge&logo=markdown)]"
-            "(https://lailai.one/blog/solution/P1001)\n\n"
+            "(https://www.luogu.com.cn/problem/P1001)\n\n"
         ))
-        self.assertEqual(result.count("img.shields.io"), 2)
+        self.assertEqual(result.count("img.shields.io"), 1)
 
 
 if __name__ == "__main__":

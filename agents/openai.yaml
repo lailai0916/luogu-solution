@@ -1,4 +1,4 @@
 interface:
   display_name: "Luogu Solution"
   short_description: "Fetch, solve, verify, write, and publish Luogu solutions."
-  default_prompt: "Use $luogu-solution to complete a Luogu problem from official statement retrieval through verification and a concise publishable solution."
+  default_prompt: "Use $luogu-solution to complete a Luogu problem from official statement retrieval through verification and a detailed, technically complete publishable solution."

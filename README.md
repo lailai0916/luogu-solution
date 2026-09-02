@@ -14,20 +14,32 @@
 
 A runtime-neutral Agent Skill for the complete Luogu solution workflow: retrieve the official
 statement, study accessible references, derive and verify an algorithm, stress test it, write a
-concise Chinese solution, and safely create or synchronize a Luogu article.
+detailed Chinese solution, and safely create or synchronize a Luogu article.
 
 ## Project Features
 
 - **Official source first** — Luogu remains authoritative for statements, limits, samples, and
   current submission rules.
+- **Hard candidate gate** — new work requires a purple-or-harder problem, an open solution channel,
+  at most three existing solutions, and no earlier solution article for the same PID in the
+  authenticated account; runtime configuration cannot weaken these thresholds.
 - **Correctness before prose** — proof, compilation, samples, boundary cases, and deterministic
   stress testing form one workflow.
-- **Dense OI writing** — H2-only solution structure, problem-specific explanation, and
-  proportional complexity analysis.
-- **Composable GNU C++14 style** — a compact default profile plus clean replacement by a caller or
+- **Originality by construction** — existing solutions stay locked until an independent code and
+  full-draft checkpoint exists, followed by a five-axis audit bound to the current artifacts and
+  complete reference ledger.
+- **Official-judge review gate** — review submission requires an Accepted record for the current
+  account, PID, and exact cached source, with identical article reference code; local verification
+  or a different AC program cannot pass.
+- **Thorough OI explanation** — H2-only solution structure with complete problem-specific
+  derivation, correctness, implementation correspondence, and proportional complexity analysis,
+  without beginner-level padding.
+- **Composable GNU C++17 style** — a compact default profile plus clean replacement by a caller or
   target repository's own OI style, without copied rule manuals.
 - **Safe account operations** — local credentials, explicit live authorization, full read-back,
-  and a current platform-policy or account-exception gate before review submission.
+  an exact-source official-judge gate, and a no-delete retirement lifecycle that preserves the
+  original article and `lid`; explicit maintenance routes distinguish personal-hidden drafts from
+  public standalone drafts, and neither can create articles or request review.
 
 ## Getting Started
 
@@ -35,6 +47,7 @@ concise Chinese solution, and safely create or synchronize a Luogu article.
 git clone https://github.com/lailai0916/luogu-solution ~/.agents/skills/luogu-solution
 cd ~/.agents/skills/luogu-solution
 python3 -m pip install -r requirements.txt
+python3 scripts/candidate.py P1001
 python3 scripts/fetch.py P1001
 ```
 

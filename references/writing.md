@@ -6,18 +6,39 @@ This file is a compact fallback for callers without a complete presentation prof
 caller or target supplies writing, terminology, Markdown, or LaTeX rules, load all matching rules
 before drafting and apply them as hard constraints. They override both this fallback and a
 platform formatting guide wherever they conflict. Keep those rules at their owner; do not copy
-their manuals into this Skill.
+their manuals into this Skill. They may refine tone and presentation density, but they do not
+waive the technical-completeness requirement below.
 
-## Audience and density
+## Audience and level of detail
 
 Write for a reader who already knows standard C++ and common OI algorithms. Explain the
 problem-specific insight and its proof; do not explain loops, arrays, binary search, ordinary DP,
-or other prerequisites unless this problem uses them in an unusual way. Prefer a few dense,
-professional paragraphs to a long tutorial.
+or other prerequisites unless this problem uses them in an unusual way.
+
+Default to a detailed explanation. Completeness outranks brevity: expand every problem-specific
+inference until the reader can reconstruct the algorithm, proof, and implementation without
+guessing an omitted step. Detail is measured by technical coverage, not word count. Do not pad a
+short argument, repeat the same conclusion, or turn a standard prerequisite into a textbook
+tutorial.
 
 Do not use filler such as “显然”“不难发现”“众所周知” in place of an argument. State the reason
 directly. Do not copy the statement, narrate the writing process, seek likes, address reviewers,
 or add personal/AI signatures.
+
+The explanation normally covers all of the following that apply:
+
+- what observation or constraint motivates the chosen transformation, state, or data structure;
+- the exact meaning and valid range of every important symbol, state, interval, and invariant;
+- how each formula, transition, or construction is derived, including the intermediate step that
+  makes the next conclusion valid;
+- why every produced result is legal and why no legal or optimal result is lost;
+- how the decisive variables, update order, data-structure operations, and boundary cases map to
+  the reference code;
+- the required complexity treatment under the rule below.
+
+A formula without derivation, a transition justified only by “于是”, or a key condition that
+first appears in code is incomplete even when an experienced reader could infer the missing
+reasoning.
 
 ## Structure
 
@@ -41,8 +62,9 @@ exclusive cases; do not replace one derivation chain with many tiny headings or 
 headings.
 
 Correctness belongs next to the step it justifies. A separate proof section is reserved for a
-long, genuinely independent proof. Headings below H2 are exceptional and must mark substantial,
-independent phases rather than “观察”“状态”“转移”“正确性” fragments.
+long, genuinely independent proof. Keeping correctness local does not permit shortening it to an
+unsupported assertion. Headings below H2 are exceptional and must mark substantial, independent
+phases rather than “观察”“状态”“转移”“正确性” fragments.
 
 ## Complexity placement
 
@@ -79,12 +101,18 @@ The fenced program is always directly visible. Never wrap reference code in
 
 ## Final pass
 
-- The central observation is justified, and every condition in the code appears in the prose.
-- No paragraph teaches a standard prerequisite or repeats an earlier conclusion.
+- Every problem-specific inference is explicit; the observation, derivation, correctness, and
+  implementation correspondence form one complete chain.
+- Every decisive condition and boundary in the code appears in the prose, with its purpose and
+  required update order when order matters.
+- No paragraph teaches a standard prerequisite or repeats an earlier conclusion merely to add
+  length.
 - Heading depth is at most H2; structure has not been mechanically fragmented.
 - Complexity treatment matches the three-level rule above.
 - The reference program is directly visible and has no collapsible wrapper.
 - Formula, code, and terminology are consistent; no invented AC or optimality claim appears.
+- If references were consulted, the derivation order, notation, examples, variable groups, helper
+  decomposition, and code control flow pass the separate originality audit.
 - The active caller / target writing, Markdown, LaTeX, and code checkers all pass; a pass from this
   Skill's structural linter alone never claims profile compliance.
 - No AI declaration, promotional footer, reviewer request, or process narration appears in the

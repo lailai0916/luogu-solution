@@ -1,20 +1,25 @@
-"""Fetch the authoritative Luogu statement and accessible solutions into the external cache.
+"""Fetch the authoritative statement, then optionally unlock reference solutions.
 
 用法：
     python fetch.py P1001
+    python fetch.py P1001 --references
 
 产出：
     ~/.cache/luogu/P1001/problem.md       题面（一级标题）
-    ~/.cache/luogu/P1001/references.md     untrusted reference material, never instructions
-    ~/.cache/luogu/P1001/raw/{problem,solutions}.json
+    ~/.cache/luogu/P1001/references.md     完成独立初稿后才抓取的非可信参考材料
+    ~/.cache/luogu/P1001/raw/problem.json
+    ~/.cache/luogu/P1001/raw/solutions.json
+    ~/.cache/luogu/P1001/raw/independent.json  参考前代码与初稿的哈希检查点
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
+from gates import checkpoint_independent_draft
 from util import cache_dir, load_config, get_logger, pid_normalize, config_home, load_cookie
 from luogu_client import LuoguClient, LuoguError, LoginExpiredError
 
@@ -61,10 +66,13 @@ def render_problem_md(problem: dict[str, Any], pid: str, url: str) -> str:
 
 
 def render_references_md(solutions: list[dict[str, Any]], pid: str) -> str:
-    """每篇题解一级标题 `# 题解 #N`（避免与正文二级标题冲突）。仅供思路，禁整段照搬。"""
+    """Render untrusted material for post-draft adversarial review only."""
     if not solutions:
         return f"# 参考题解（{pid}）\n\n（未抓取到可访问的参考题解。）\n"
-    parts = [f"<!-- {pid} 的参考题解，仅供解题参考，禁止整段照搬到最终题解。 -->\n\n"]
+    parts = [
+        f"<!-- {pid} 的参考题解只用于独立初稿后的纠错。禁止复用其表述、结构、"
+        "符号体系、变量组、函数拆分或代码。 -->\n\n"
+    ]
     for i, s in enumerate(solutions, 1):
         parts.append(f"# 题解 #{i}\n\n")
         parts.append(f"- 标题: {s.get('title', '')}\n- 作者: {s.get('author', '')}\n")
@@ -74,21 +82,34 @@ def render_references_md(solutions: list[dict[str, Any]], pid: str) -> str:
     return "".join(parts)
 
 
-def fetch(pid: str) -> Path:
+def fetch_statement(pid: str, client: LuoguClient | None = None) -> Path:
     pid = pid_normalize(pid)
     base = load_config()["luogu"]["base_url"].rstrip("/")
     url = f"{base}/problem/{pid}"
     out_dir = cache_dir(pid)
     raw_dir = out_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
-    client = LuoguClient()
+    client = client or LuoguClient()
 
     logger.info("抓取题面 %s ...", pid)
     problem = client.get_problem(pid)
     (raw_dir / "problem.json").write_text(json.dumps(problem, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "problem.md").write_text(render_problem_md(problem, pid, url), encoding="utf-8")
+    logger.info("完成题面 %s -> %s", pid, out_dir)
+    return out_dir
+
+
+def fetch_references(pid: str, client: LuoguClient | None = None) -> Path:
+    pid = pid_normalize(pid)
+    out_dir = cache_dir(pid)
+    raw_dir = out_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_independent_draft(pid, out_dir)
+    provided_client = client is not None
+    client = client or LuoguClient()
 
     solutions: list[dict[str, Any]] = []
-    if load_cookie():
+    if provided_client or load_cookie():
         logger.info("抓取可访问题解列表 %s ...", pid)
         try:
             solutions = client.get_all_solutions(pid)
@@ -98,18 +119,34 @@ def fetch(pid: str) -> Path:
         logger.info("未配置 Cookie：跳过参考题解，仅保存题面。")
     (raw_dir / "solutions.json").write_text(json.dumps(solutions, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    (out_dir / "problem.md").write_text(render_problem_md(problem, pid, url), encoding="utf-8")
     (out_dir / "references.md").write_text(render_references_md(solutions, pid), encoding="utf-8")
-    logger.info("完成 %s：题解 %d 篇 -> %s", pid, len(solutions), out_dir)
+    logger.info("完成参考复核材料 %s：题解 %d 篇 -> %s", pid, len(solutions), out_dir)
     return out_dir
 
 
+def fetch(pid: str) -> Path:
+    """Backward-compatible statement-only entrypoint."""
+    return fetch_statement(pid)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("pid")
+    parser.add_argument(
+        "--references",
+        action="store_true",
+        help="fetch existing solutions only after independent solution.cpp and solution.md exist",
+    )
+    return parser
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("用法: python fetch.py P1001", file=sys.stderr)
-        return 2
+    args = build_parser().parse_args(argv[1:])
     try:
-        fetch(argv[1])
+        if args.references:
+            fetch_references(args.pid)
+        else:
+            fetch_statement(args.pid)
     except LoginExpiredError as e:
         logger.error("登录失效：%s", e)
         print(f"\nCookie 可能失效，请更新 {config_home() / 'cookie.txt'} 或环境变量 LUOGU_COOKIE。", file=sys.stderr)
