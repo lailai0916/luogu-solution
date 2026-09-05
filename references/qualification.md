@@ -6,8 +6,15 @@ not runtime-configurable.
 
 ## New-candidate gate
 
-Run the complete gate before creating code, prose, a brute force, or a generator, and rerun it
-immediately before creating a live article. The default policy requires all of the following:
+This gate applies to new solution creation and new live solution articles. Run it before
+creating new code, prose, a brute force, or a generator for that route, and rerun it immediately
+before creating a new live article. It is not a prerequisite to reviewing or revising a supplied
+existing draft. An update to an explicitly bound existing article follows the maintenance route
+in [publishing.md](publishing.md), which still enforces the applicable verification and write
+gates. Report any discovered ineligibility; neither local revision nor an existing article
+authorizes a new article or a review request.
+
+The default policy requires all of the following:
 
 - a rated Luogu theme-bank problem with difficulty at least purple (`difficulty >= 7`);
 - an open solution channel (`acceptSolution: true`);
@@ -18,8 +25,8 @@ immediately before creating a live article. The default policy requires all of t
 The gate is fail-closed. A missing or unparseable live field, incomplete account history, expired
 login, or failed request is a rejection, not permission to continue. Local ledgers, site indexes,
 cached misses, downloaded-reference counts, accepted-problem lists, and public-solution absence
-cannot replace the corresponding live check. Qualification must finish before parallel solving or
-writing starts.
+cannot replace the corresponding live check. On the new-solution route, qualification must finish
+before parallel solving or writing starts.
 
 No config file, environment variable, batch option, or caller preference may lower the minimum
 difficulty, raise the public-solution limit, skip the open-channel check, or disable the complete

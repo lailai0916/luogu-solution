@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Scoped new-candidate selection to new solution creation and new live articles. Supplied-draft
+  review and bound-article maintenance retain their own routes without weakening correctness,
+  originality, current-task authorization, or review-submission gates.
 - Added a non-disableable process-wide Luogu request limiter: all requests are serialized with a
   one-second hard interval, authenticated writes use a two-second hard interval, smaller local
   values are ignored, and rate-limit or anti-abuse failures stop instead of entering retry loops.

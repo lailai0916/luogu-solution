@@ -123,8 +123,10 @@ class PublishPolicyTest(unittest.TestCase):
     @patch("publish.require_article_code_matches_source")
     @patch("publish.require_local_verification")
     @patch("publish.require_originality_audit")
+    @patch("publish.check_candidate")
     def test_save_hidden_updates_only_bound_article_without_review(
         self,
+        candidate_gate,
         originality_gate,
         local_verification_gate,
         article_code_gate,
@@ -169,6 +171,7 @@ class PublishPolicyTest(unittest.TestCase):
         self.assertEqual(payload["title"], current["title"])
         client.create_article.assert_not_called()
         client.request_solution_review.assert_not_called()
+        candidate_gate.assert_not_called()
         originality_gate.assert_called_once()
         local_verification_gate.assert_called_once()
         article_code_gate.assert_called_once()
