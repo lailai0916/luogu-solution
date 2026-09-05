@@ -66,8 +66,21 @@ python3 scripts/verify.py <PID>
 The default verification target is C++17. Select the current C++17 option on Luogu and enable O2;
 local verification uses `-std=c++17`. An explicit caller / target language replaces this default,
 but local verification and the eventual submission must use the same language standard. The
-verifier runs all official samples; add
-targeted cases for boundaries and fragile branches. When a small exact solver is feasible,
+verifier runs all official samples. For output with a declared numeric tolerance, nonnumeric
+tokens such as `Case #1:` must still match exactly. If a construction or other non-unique-output
+problem cannot be judged by literal comparison, add a problem-local `sample_checker.py` that
+validates the complete output against the input; an unconditional or partial checker is invalid.
+The checker receives the input, actual-output, and official-output file paths in that order, and
+its digest is bound to the verification record. Add targeted cases for boundaries and fragile
+branches. For an interactive problem, add a problem-local `interactor.py`. The verifier passes the
+compiled program path as its only argument; the interactor must drive the complete protocol,
+enforce query and coordinate limits, validate every final answer, and return nonzero on any
+failure. For a communication problem whose submission is a callback library rather than a
+standalone program, add a problem-local `grader.cpp`. The verifier links it with
+`solution.cpp`; the grader must simulate the complete call protocol, enforce every operation
+constraint, validate all recovered results, and return nonzero on any failure. The digest of an
+interactor or communication grader is bound to the verification record. The two mechanisms cannot
+be enabled together. When a small exact solver is feasible,
 also write `brute.cpp` and a deterministic `generator.py`; run:
 
 ```bash
@@ -79,7 +92,8 @@ The stress runner compiles both programs, compares normalized output, and preser
 counterexample in `stress-failure/`. A pass only establishes the tested range, not a proof.
 
 Every verifier run records its result under `raw/local-verification.json`, bound to the current
-official statement and `solution.cpp`. A failed run replaces the pass state. Draft synchronization
+official statement, `solution.cpp`, and any problem-local sample checker, interactor, or
+communication grader. A failed run replaces the pass state. Draft synchronization
 requires a current passing record and exact agreement between `solution.cpp` and the single code
 block in `solution.md`; editing either artifact requires verification again.
 
@@ -162,7 +176,7 @@ metadata according to their own rules.
 | Judge result is not Accepted | Use the exact record as evidence, repair code and prose, reverify, then resubmit if authorized |
 | No current-account Accepted record exactly matches `solution.cpp` | Do not create/update a review-bound article or request review; submit the exact code to the official judge first |
 | Proof unresolved | Report uncertainty; do not publish a polished guess |
-| Existing solution was read before the independent checkpoint | Restart from the official statement without the contaminated draft, or stop |
+| Existing solution was read before the independent checkpoint | Before editing, seal it with `--start-remediation`; then rebuild both prose and code and complete the five-axis audit |
 | Similarity to a reference remains unexplained | Do not deliver, synchronize, or submit the article; rebuild independently |
 | Endpoint or read-back mismatch | Stop account writes and preserve the local draft |
 | HTTP 429 | Stop, read back the exact target, and resume only after the measured server cooldown |

@@ -1,9 +1,10 @@
-"""验证题解代码：编译 solution.cpp + 跑样例。
+"""验证题解代码：编译 solution.cpp，并运行对应的本地验证器。
 
 用法：
     python verify.py P1001
 
-读 ~/.cache/luogu/<PID>/solution.cpp 与 raw/problem.json 的样例。
+默认读取 raw/problem.json 的样例；交互题可提供 interactor.py，通信题可提供
+grader.cpp。
 返回码 0 = 通过；非 0 = 失败。**本地样例过不等于 AC**，不得虚构在线评测结果。
 """
 from __future__ import annotations
@@ -89,16 +90,77 @@ def _outputs_match(got: str, expected: str, tolerance: float | None) -> bool:
     expected_tokens = expected.split()
     if len(got_tokens) != len(expected_tokens):
         return False
+    for got_token, expected_token in zip(got_tokens, expected_tokens):
+        if got_token == expected_token:
+            continue
+        try:
+            got_value = float(got_token)
+            expected_value = float(expected_token)
+        except ValueError:
+            return False
+        if (
+            not math.isfinite(got_value)
+            or not math.isfinite(expected_value)
+            or abs(got_value - expected_value) > tolerance * max(1.0, abs(expected_value))
+        ):
+            return False
+    return True
+
+
+def _run_sample_checker(
+    checker: Path,
+    sample_input: str,
+    actual_output: str,
+    expected_output: str,
+    timeout: int,
+) -> tuple[bool, str]:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        input_path = root / "input.txt"
+        actual_path = root / "actual.txt"
+        expected_path = root / "expected.txt"
+        input_path.write_text(sample_input, encoding="utf-8")
+        actual_path.write_text(actual_output, encoding="utf-8")
+        expected_path.write_text(expected_output, encoding="utf-8")
+        try:
+            result = subprocess.run(
+                [sys.executable, str(checker), str(input_path), str(actual_path), str(expected_path)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return False, "题目专用样例校验器运行超时"
+        detail = (result.stderr or result.stdout or "").strip()
+        return result.returncode == 0, detail
+
+
+def _run_interactor(interactor: Path, binary: Path, timeout: int) -> tuple[bool, str]:
     try:
-        pairs = [(float(x), float(y)) for x, y in zip(got_tokens, expected_tokens)]
-    except ValueError:
-        return False
-    return all(
-        math.isfinite(x)
-        and math.isfinite(y)
-        and abs(x - y) <= tolerance * max(1.0, abs(y))
-        for x, y in pairs
-    )
+        result = subprocess.run(
+            [sys.executable, str(interactor), str(binary)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "题目专用交互器运行超时"
+    detail = (result.stderr or result.stdout or "").strip()
+    return result.returncode == 0, detail
+
+
+def _run_grader(binary: Path, timeout: int) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            [str(binary)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "题目专用通信模拟器运行超时"
+    detail = (result.stderr or result.stdout or "").strip()
+    return result.returncode == 0, detail
 
 
 def verify(pid: str) -> VerifyResult:
@@ -112,10 +174,17 @@ def verify(pid: str) -> VerifyResult:
         return res
 
     cfg = load_config()["verify"]
+    interactor = work_dir / "interactor.py"
+    grader = work_dir / "grader.cpp"
+    if interactor.exists() and grader.exists():
+        res.add("验证配置", False, "interactor.py 与 grader.cpp 不能同时存在")
+        return res
     with tempfile.TemporaryDirectory() as td:
         binary = Path(td) / "sol"
         optimization = str(cfg.get("optimization", "O2"))
         cmd = [cfg["cxx"], f"-std={cfg['std']}", f"-{optimization}", "-o", str(binary), str(src)]
+        if grader.exists():
+            cmd.append(str(grader))
         # macOS/Apple clang 无 <bits/stdc++.h>，用垫片头补（不影响 GNU g++）。
         if compat_dir().exists():
             cmd[1:1] = ["-I", str(compat_dir())]
@@ -134,11 +203,35 @@ def verify(pid: str) -> VerifyResult:
         res.add("编译", True, f"{cfg['cxx']} -std={cfg['std']} -{optimization}")
 
         problem = _load_problem(pid)
+        if grader.exists():
+            matched, detail = _run_grader(
+                binary,
+                max(120, int(cfg.get("run_timeout", 10))),
+            )
+            res.add(
+                "通信模拟",
+                matched,
+                detail or ("通过" if matched else "题目专用通信模拟器拒绝程序"),
+            )
+            return res
+        if interactor.exists():
+            matched, detail = _run_interactor(
+                interactor,
+                binary,
+                max(120, int(cfg.get("run_timeout", 10))),
+            )
+            res.add(
+                "交互模拟",
+                matched,
+                detail or ("通过" if matched else "题目专用交互器拒绝程序"),
+            )
+            return res
         samples = _load_samples(problem)
         if not samples:
             res.add("样例运行", True, "无样例，跳过")
             return res
         run_timeout = int(cfg.get("run_timeout", 10))
+        sample_checker = work_dir / "sample_checker.py"
         passed = 0
         for i, (inp, expected) in enumerate(samples, 1):
             try:
@@ -151,11 +244,25 @@ def verify(pid: str) -> VerifyResult:
                 res.add(f"样例 #{i}", False, f"运行非零退出 {rp.returncode}")
                 continue
             got, exp = _normalize_output(rp.stdout), _normalize_output(expected)
-            if _outputs_match(got, exp, _float_tolerance(problem)):
-                passed += 1
-                res.add(f"样例 #{i}", True, "通过")
+            if sample_checker.exists():
+                matched, detail = _run_sample_checker(
+                    sample_checker,
+                    inp,
+                    rp.stdout,
+                    expected,
+                    run_timeout,
+                )
             else:
-                res.add(f"样例 #{i}", False, f"输出不符\n  期望: {exp[:120]!r}\n  实际: {got[:120]!r}")
+                matched = _outputs_match(got, exp, _float_tolerance(problem))
+                detail = ""
+            if matched:
+                passed += 1
+                res.add(f"样例 #{i}", True, detail or "通过")
+            else:
+                if sample_checker.exists():
+                    res.add(f"样例 #{i}", False, detail or "题目专用样例校验器拒绝输出")
+                else:
+                    res.add(f"样例 #{i}", False, f"输出不符\n  期望: {exp[:120]!r}\n  实际: {got[:120]!r}")
         logger.info("样例通过 %d/%d", passed, len(samples))
     return res
 
@@ -168,12 +275,21 @@ def record_verification(pid: str, result: VerifyResult) -> Path:
     statement = work_dir / "problem.md"
     source = work_dir / "solution.cpp"
     evidence = {
-        "version": 1,
+        "version": 4,
         "pid": pid,
         "status": "pass" if result.ok else "fail",
         "recordedAt": datetime.now(timezone.utc).isoformat(),
         "statement": artifact_digest(statement) if statement.exists() else None,
         "source": artifact_digest(source) if source.exists() else None,
+        "checker": artifact_digest(work_dir / "sample_checker.py")
+        if (work_dir / "sample_checker.py").exists()
+        else None,
+        "interactor": artifact_digest(work_dir / "interactor.py")
+        if (work_dir / "interactor.py").exists()
+        else None,
+        "grader": artifact_digest(work_dir / "grader.cpp")
+        if (work_dir / "grader.cpp").exists()
+        else None,
         "steps": result.steps,
     }
     path = raw_dir / "local-verification.json"

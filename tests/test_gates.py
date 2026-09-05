@@ -18,6 +18,7 @@ from gates import (  # noqa: E402
     require_independent_checkpoint,
     require_local_verification,
     require_originality_audit,
+    start_originality_remediation,
 )
 
 
@@ -86,6 +87,42 @@ class WorkflowGateTest(unittest.TestCase):
             del findings[ORIGINALITY_AXES[0]]
             with self.assertRaisesRegex(Exception, ORIGINALITY_AXES[0]):
                 record_originality_audit("P1001", root, findings)
+
+    def test_post_reference_remediation_requires_both_artifacts_to_be_rewritten(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_problem(root)
+            (root / "raw").mkdir()
+            (root / "raw" / "solutions.json").write_text(
+                '[{"lid": "abcdefgh", "content": "参考"}]\n',
+                encoding="utf-8",
+            )
+            start_originality_remediation("P1001", root)
+            with self.assertRaisesRegex(Exception, "solution.cpp.*尚未重写"):
+                record_originality_audit("P1001", root, self.findings())
+            (root / "solution.cpp").write_text("int main(){return 0;}\n", encoding="utf-8")
+            with self.assertRaisesRegex(Exception, "solution.md.*尚未重写"):
+                record_originality_audit("P1001", root, self.findings())
+            (root / "solution.md").write_text("## 解题思路\n\n重新推导。\n", encoding="utf-8")
+            path = record_originality_audit("P1001", root, self.findings())
+            audit = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(audit["provenance"]["mode"], "post-reference-remediation")
+            self.assertEqual(require_originality_audit("P1001", root)["status"], "pass")
+
+    def test_post_reference_remediation_is_bound_to_reference_set(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_problem(root)
+            (root / "raw").mkdir()
+            references = root / "raw" / "solutions.json"
+            references.write_text('[{"lid": "abcdefgh"}]\n', encoding="utf-8")
+            start_originality_remediation("P1001", root)
+            (root / "solution.cpp").write_text("int main(){return 0;}\n", encoding="utf-8")
+            (root / "solution.md").write_text("## 解题思路\n\n重新推导。\n", encoding="utf-8")
+            record_originality_audit("P1001", root, self.findings())
+            references.write_text('[{"lid": "changed"}]\n', encoding="utf-8")
+            with self.assertRaisesRegex(Exception, "参考题解集合.*重新开始"):
+                require_originality_audit("P1001", root)
 
     def test_audit_file_has_no_untracked_fields_from_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -159,6 +196,84 @@ class WorkflowGateTest(unittest.TestCase):
             self.assertEqual(require_local_verification("P1001", root)["status"], "pass")
             (root / "solution.cpp").write_text("int main(){return 0;}\n", encoding="utf-8")
             with self.assertRaisesRegex(Exception, "solution.cpp.*重新验证"):
+                require_local_verification("P1001", root)
+
+    def test_local_verification_is_bound_to_sample_checker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_problem(root)
+            checker = root / "sample_checker.py"
+            checker.write_text("raise SystemExit(0)\n", encoding="utf-8")
+            (root / "raw").mkdir()
+            evidence = {
+                "version": 2,
+                "pid": "P1001",
+                "status": "pass",
+                "statement": artifact_digest(root / "problem.md"),
+                "source": artifact_digest(root / "solution.cpp"),
+                "checker": artifact_digest(checker),
+                "steps": [{"step": "编译", "ok": True, "detail": "C++17"}],
+            }
+            (root / "raw" / "local-verification.json").write_text(
+                json.dumps(evidence),
+                encoding="utf-8",
+            )
+            self.assertEqual(require_local_verification("P1001", root)["status"], "pass")
+            checker.write_text("raise SystemExit(1)\n", encoding="utf-8")
+            with self.assertRaisesRegex(Exception, "样例校验器.*重新验证"):
+                require_local_verification("P1001", root)
+
+    def test_local_verification_is_bound_to_interactor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_problem(root)
+            interactor = root / "interactor.py"
+            interactor.write_text("raise SystemExit(0)\n", encoding="utf-8")
+            (root / "raw").mkdir()
+            evidence = {
+                "version": 3,
+                "pid": "P1001",
+                "status": "pass",
+                "statement": artifact_digest(root / "problem.md"),
+                "source": artifact_digest(root / "solution.cpp"),
+                "checker": None,
+                "interactor": artifact_digest(interactor),
+                "steps": [{"step": "交互模拟", "ok": True, "detail": "通过"}],
+            }
+            (root / "raw" / "local-verification.json").write_text(
+                json.dumps(evidence),
+                encoding="utf-8",
+            )
+            self.assertEqual(require_local_verification("P1001", root)["status"], "pass")
+            interactor.write_text("raise SystemExit(1)\n", encoding="utf-8")
+            with self.assertRaisesRegex(Exception, "交互器.*重新验证"):
+                require_local_verification("P1001", root)
+
+    def test_local_verification_is_bound_to_communication_grader(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_problem(root)
+            grader = root / "grader.cpp"
+            grader.write_text("int main(){}\n", encoding="utf-8")
+            (root / "raw").mkdir()
+            evidence = {
+                "version": 4,
+                "pid": "P1001",
+                "status": "pass",
+                "statement": artifact_digest(root / "problem.md"),
+                "source": artifact_digest(root / "solution.cpp"),
+                "checker": None,
+                "interactor": None,
+                "grader": artifact_digest(grader),
+                "steps": [{"step": "通信模拟", "ok": True, "detail": "通过"}],
+            }
+            (root / "raw" / "local-verification.json").write_text(
+                json.dumps(evidence),
+                encoding="utf-8",
+            )
+            self.assertEqual(require_local_verification("P1001", root)["status"], "pass")
+            grader.write_text("int main(){return 1;}\n", encoding="utf-8")
+            with self.assertRaisesRegex(Exception, "通信模拟器.*重新验证"):
                 require_local_verification("P1001", root)
 
     def test_article_code_must_equal_current_source(self) -> None:

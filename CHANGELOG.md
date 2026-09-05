@@ -5,6 +5,19 @@
 - Scoped new-candidate selection to new solution creation and new live articles. Supplied-draft
   review and bound-article maintenance retain their own routes without weakening correctness,
   originality, current-task authorization, or review-submission gates.
+- Added first-class communication-problem verification. A problem-local `grader.cpp` is linked
+  with the callback-based solution, drives the full simulation, and is digest-bound to the local
+  verification record.
+- Added hash-bound problem-local interactive verification. `verify.py` now compiles the candidate,
+  lets `interactor.py` drive the full protocol, records its result instead of comparing a static
+  transcript, and rejects stale or unbound interactors at publication gates.
+- Added an explicit post-reference remediation path for contaminated historical drafts. It seals
+  the old prose, code, statement, and reference set before editing; requires both final artifacts
+  to differ; labels the provenance honestly; and keeps the ordinary five-axis, hash-bound audit.
+- Fixed local sample verification for mixed text-and-floating-point output: numeric tokens use the
+  declared tolerance while labels remain exact. Added hash-bound problem-local sample checkers for
+  construction and other non-unique-output tasks, with stale-checker rejection at publication
+  gates.
 - Added a non-disableable process-wide Luogu request limiter: all requests are serialized with a
   one-second hard interval, authenticated writes use a two-second hard interval, smaller local
   values are ignored, and rate-limit or anti-abuse failures stop instead of entering retry loops.

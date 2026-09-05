@@ -23,6 +23,26 @@ Do not browse public editorials, code, or discussions before the independent che
 problem cannot be solved independently, report that limitation instead of disguising a reference
 solution as an independent one.
 
+## Historical remediation
+
+An old draft that was written after references had already been opened must never receive a fake
+pre-reference checkpoint. Before changing that draft, run:
+
+```bash
+python3 scripts/originality.py <PID> --start-remediation
+```
+
+This seals the official statement, fetched-reference set, and both contaminated baseline
+artifacts. The remediation path then requires both `solution.cpp` and `solution.md` to be rebuilt;
+changing only names, formatting, or isolated sentences is not sufficient semantic remediation.
+After the rebuild, compare all five axes and record the ordinary report. The resulting audit states
+`post-reference-remediation` explicitly and remains hash-bound to the baseline checkpoint,
+reference set, and final artifacts.
+
+This exception exists only for honest repair of already exposed historical material. New work must
+use the pre-reference independent checkpoint. If an independent checkpoint already exists, the
+remediation command refuses to replace it.
+
 ## Forbidden transfer
 
 Never copy, translate, lightly paraphrase, or style-convert another solution. In particular, do

@@ -10,6 +10,7 @@ from gates import (
     checkpoint_independent_draft,
     record_originality_audit,
     require_originality_audit,
+    start_originality_remediation,
 )
 from luogu_client import LuoguError
 from util import cache_dir, get_logger, pid_normalize
@@ -27,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="seal the independent statement, code, and full draft before public reference access",
     )
+    action.add_argument(
+        "--start-remediation",
+        action="store_true",
+        help="seal already reference-exposed artifacts before a full prose-and-code rebuild",
+    )
     action.add_argument("--report", type=Path, help="JSON object with one nonempty finding per axis")
     action.add_argument("--check", action="store_true", help="validate the current recorded audit")
     return parser
@@ -40,6 +46,9 @@ def main(argv: list[str]) -> int:
         if args.checkpoint:
             path = checkpoint_independent_draft(pid, problem_dir)
             print(f"已记录参考前独立初稿检查点：{path}")
+        elif args.start_remediation:
+            path = start_originality_remediation(pid, problem_dir)
+            print(f"已记录污染后重建检查点：{path}")
         elif args.report:
             findings = json.loads(args.report.expanduser().read_text(encoding="utf-8"))
             if not isinstance(findings, dict):

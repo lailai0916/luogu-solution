@@ -136,6 +136,79 @@ def _reference_state(
     }
 
 
+def require_originality_remediation(
+    pid: str,
+    problem_dir: Path,
+    *,
+    require_rewritten: bool = True,
+) -> dict[str, Any]:
+    checkpoint = _read_json(
+        problem_dir / "raw" / "remediation.json",
+        missing=f"{pid} 缺少污染后重建检查点。",
+        malformed=f"{pid} 的污染后重建检查点损坏。",
+    )
+    baseline = checkpoint.get("baseline") if isinstance(checkpoint, dict) else None
+    if (
+        not isinstance(checkpoint, dict)
+        or checkpoint.get("version") != 1
+        or checkpoint.get("pid") != pid
+        or not _valid_digest(checkpoint.get("statement"))
+        or not isinstance(baseline, dict)
+        or any(not _valid_digest(baseline.get(name)) for name in ARTIFACT_NAMES)
+        or not isinstance(checkpoint.get("references"), dict)
+    ):
+        raise LuoguError(f"{pid} 的污染后重建检查点格式错误。")
+    statement = problem_dir / "problem.md"
+    if not statement.exists() or checkpoint["statement"] != artifact_digest(statement):
+        raise LuoguError(f"{pid} 的官方题面在污染后重建检查点后发生变化，必须重新开始。")
+    if checkpoint["references"] != _reference_state(_read_references(pid, problem_dir), problem_dir):
+        raise LuoguError(f"{pid} 的参考题解集合在污染后重建检查点后发生变化，必须重新开始。")
+    if require_rewritten:
+        for name in ARTIFACT_NAMES:
+            artifact = problem_dir / name
+            if not artifact.exists() or baseline[name] == artifact_digest(artifact):
+                raise LuoguError(f"{pid} 的 {name} 尚未重写，不能完成污染后原创性审计。")
+    return checkpoint
+
+
+def start_originality_remediation(pid: str, problem_dir: Path) -> Path:
+    raw_dir = problem_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    if (raw_dir / "independent.json").exists():
+        raise LuoguError(f"{pid} 已有参考前独立初稿检查点，不应改用污染后重建流程。")
+    path = raw_dir / "remediation.json"
+    if path.exists():
+        require_originality_remediation(pid, problem_dir, require_rewritten=False)
+        return path
+    references = _read_references(pid, problem_dir)
+    if not references:
+        raise LuoguError(f"{pid} 没有已读取的参考题解，不应启动污染后重建流程。")
+    statement = problem_dir / "problem.md"
+    if not statement.exists() or not statement.read_text(encoding="utf-8").strip():
+        raise LuoguError(f"{pid} 必须先保留官方题面，再启动污染后重建。")
+    baseline: dict[str, Any] = {}
+    for name in ARTIFACT_NAMES:
+        artifact = problem_dir / name
+        if not artifact.exists() or not artifact.read_text(encoding="utf-8").strip():
+            raise LuoguError(f"{pid} 缺少待重建的 {name}。")
+        baseline[name] = artifact_digest(artifact)
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "pid": pid,
+                "statement": artifact_digest(statement),
+                "baseline": baseline,
+                "references": _reference_state(references, problem_dir),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def record_originality_audit(
     pid: str,
     problem_dir: Path,
@@ -159,7 +232,15 @@ def record_originality_audit(
             seen_urls.add(url)
     if not references and not normalized_sources:
         raise LuoguError(f"{pid} 没有任何参考来源，无需生成原创性审计。")
-    require_independent_checkpoint(pid, problem_dir)
+    remediation_path = problem_dir / "raw" / "remediation.json"
+    if remediation_path.exists():
+        checkpoint_path = remediation_path
+        require_originality_remediation(pid, problem_dir)
+        mode = "post-reference-remediation"
+    else:
+        checkpoint_path = problem_dir / "raw" / "independent.json"
+        require_independent_checkpoint(pid, problem_dir)
+        mode = "pre-reference-independent"
 
     axes: dict[str, str] = {}
     for axis in ORIGINALITY_AXES:
@@ -175,9 +256,13 @@ def record_originality_audit(
             raise LuoguError(f"{pid} 缺少当前 {name}，不能记录原创性审计。")
         draft[name] = artifact_digest(artifact)
     audit = {
-        "version": 1,
+        "version": 2,
         "pid": pid,
         "status": "pass",
+        "provenance": {
+            "mode": mode,
+            "checkpoint": artifact_digest(checkpoint_path),
+        },
         "draft": draft,
         "references": _reference_state(references, problem_dir),
         "publicSources": normalized_sources,
@@ -193,7 +278,6 @@ def require_originality_audit(pid: str, problem_dir: Path) -> dict[str, Any] | N
     audit_path = problem_dir / "raw" / "originality.json"
     if not references and not audit_path.exists():
         return None
-    require_independent_checkpoint(pid, problem_dir)
     audit = _read_json(
         audit_path,
         missing=f"{pid} 已读取参考题解，却缺少五轴原创性审计。",
@@ -201,7 +285,7 @@ def require_originality_audit(pid: str, problem_dir: Path) -> dict[str, Any] | N
     )
     if (
         not isinstance(audit, dict)
-        or audit.get("version") != 1
+        or audit.get("version") not in (1, 2)
         or audit.get("pid") != pid
         or audit.get("status") != "pass"
         or not isinstance(audit.get("draft"), dict)
@@ -212,6 +296,25 @@ def require_originality_audit(pid: str, problem_dir: Path) -> dict[str, Any] | N
         or not isinstance(audit.get("axes"), dict)
     ):
         raise LuoguError(f"{pid} 的原创性审计格式错误。")
+    if audit["version"] == 1:
+        require_independent_checkpoint(pid, problem_dir)
+    else:
+        provenance = audit.get("provenance")
+        if (
+            not isinstance(provenance, dict)
+            or provenance.get("mode")
+            not in ("pre-reference-independent", "post-reference-remediation")
+            or not _valid_digest(provenance.get("checkpoint"))
+        ):
+            raise LuoguError(f"{pid} 的原创性审计来源记录格式错误。")
+        if provenance["mode"] == "pre-reference-independent":
+            checkpoint_path = problem_dir / "raw" / "independent.json"
+            require_independent_checkpoint(pid, problem_dir)
+        else:
+            checkpoint_path = problem_dir / "raw" / "remediation.json"
+            require_originality_remediation(pid, problem_dir)
+        if not checkpoint_path.exists() or provenance["checkpoint"] != artifact_digest(checkpoint_path):
+            raise LuoguError(f"{pid} 的原创性检查点在审计后发生变化，必须重新审计。")
     for source in audit["publicSources"]:
         if (
             not isinstance(source, dict)
@@ -243,7 +346,7 @@ def require_local_verification(pid: str, problem_dir: Path) -> dict[str, Any]:
     )
     if (
         not isinstance(evidence, dict)
-        or evidence.get("version") != 1
+        or evidence.get("version") not in (1, 2, 3, 4)
         or evidence.get("pid") != pid
         or evidence.get("status") != "pass"
         or not _valid_digest(evidence.get("statement"))
@@ -259,6 +362,39 @@ def require_local_verification(pid: str, problem_dir: Path) -> dict[str, Any]:
         raise LuoguError(f"{pid} 的官方题面在本地验证后发生变化，必须重新验证。")
     if not source.exists() or evidence["source"] != artifact_digest(source):
         raise LuoguError(f"{pid} 的 solution.cpp 在本地验证后发生变化，必须重新验证。")
+    checker = problem_dir / "sample_checker.py"
+    checker_evidence = evidence.get("checker") if evidence.get("version") in (2, 3, 4) else None
+    if checker_evidence is None:
+        if checker.exists():
+            raise LuoguError(f"{pid} 的样例校验器未绑定到本地验证记录，必须重新验证。")
+    elif (
+        not _valid_digest(checker_evidence)
+        or not checker.exists()
+        or checker_evidence != artifact_digest(checker)
+    ):
+        raise LuoguError(f"{pid} 的样例校验器在本地验证后发生变化，必须重新验证。")
+    interactor = problem_dir / "interactor.py"
+    interactor_evidence = evidence.get("interactor") if evidence.get("version") in (3, 4) else None
+    if interactor_evidence is None:
+        if interactor.exists():
+            raise LuoguError(f"{pid} 的交互器未绑定到本地验证记录，必须重新验证。")
+    elif (
+        not _valid_digest(interactor_evidence)
+        or not interactor.exists()
+        or interactor_evidence != artifact_digest(interactor)
+    ):
+        raise LuoguError(f"{pid} 的交互器在本地验证后发生变化，必须重新验证。")
+    grader = problem_dir / "grader.cpp"
+    grader_evidence = evidence.get("grader") if evidence.get("version") == 4 else None
+    if grader_evidence is None:
+        if grader.exists():
+            raise LuoguError(f"{pid} 的通信模拟器未绑定到本地验证记录，必须重新验证。")
+    elif (
+        not _valid_digest(grader_evidence)
+        or not grader.exists()
+        or grader_evidence != artifact_digest(grader)
+    ):
+        raise LuoguError(f"{pid} 的通信模拟器在本地验证后发生变化，必须重新验证。")
     return evidence
 
 
